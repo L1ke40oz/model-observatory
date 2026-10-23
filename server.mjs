@@ -99,6 +99,7 @@ const assets = new Map([
   ['/site-manager.js', ['site-manager.js', 'text/javascript; charset=utf-8']],
   ['/favorites.js', ['favorites.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
+  ['/icon.jpg', ['icon.jpg', 'image/jpeg']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]
 ]);
 function json(res, status, payload) {
