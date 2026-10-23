@@ -295,7 +295,7 @@ function showInfo() {
 
 function renderSites() {
   $('site-count').textContent = state.sites.length;
-  $('site-nav').innerHTML = state.sites.map(site => `<button class="site-button${site.id === state.site ? ' active' : ''}" data-site="${escape(site.id)}" ${site.id === state.site ? 'aria-current="true"' : ''}><span class="site-mini-icon">✧</span>${escape(site.name)}<span class="dot"></span></button>`).join('');
+  $('site-nav').innerHTML = state.sites.map(site => `<button class="site-button${site.id === state.site ? ' active' : ''}" data-site="${escape(site.id)}" ${site.id === state.site ? 'aria-current="true"' : ''}><span class="site-mini-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 3 6 6 3-6 3-3 6-3-6-6-3 6-3Z"/></svg></span>${escape(site.name)}<span class="dot"></span></button>`).join('');
   $('mobile-sites').innerHTML = state.sites.map(site => `<option value="${escape(site.id)}" ${site.id === state.site ? 'selected' : ''}>${escape(site.name)}</option>`).join('');
 }
 
@@ -339,6 +339,12 @@ function render() {
   $('station-sync').textContent = `模型列表 ${catalogCount} 个 / ${state.group ? '已读取分组统计' : '有统计'} ${recordedCount} 个`;
   $('summary-scope').textContent = state.group ? '当前分组状态（含待读取）' : '最新统计状态分布';
   const notices = [];
+  const recordedMetrics = globalModels.filter(model => model.metric);
+  const noTimedHistory = recordedMetrics.length > 0 && recordedMetrics.every(model => !validSeries(model.metric.recent_success_series, referenceNow).length);
+  const hasUntimedHistory = recordedMetrics.some(model => recentRates(model.metric.recent_success_rates).length);
+  if (!state.group && noTimedHistory && !data.metrics.error) notices.push(hasUntimedHistory
+    ? '该站点的汇总只返回少量近期成功率，未提供记录时间。选择下方分组，或点击“查看分组记录”，可读取对应时段的历史统计。'
+    : '该站点的汇总提供成功率、耗时等数值，但未提供历史序列。选择下方分组，或点击“查看分组记录”，可读取近期状态和对应时段的历史统计。');
   if (data.metrics.error) notices.push(`模型统计${data.metrics.error === 'AUTH_REQUIRED' ? '需要登录，暂时无法读取' : '同步失败'}。${latestFetch ? '当前展示上次读取的历史数据，状态标记为“同步中断”。' : '暂时没有统计数据，请稍后刷新。'}`);
   if (data.catalog.error) notices.push(`模型列表${data.catalog.error === 'AUTH_REQUIRED' ? '需要登录' : '同步失败'}，当前${data.catalog.fetchedAt ? '保留上次列表' : '仅显示统计接口中出现的模型'}。`);
   $('notice').hidden = !notices.length;
@@ -360,7 +366,7 @@ function render() {
   $('state-filter').value = state.filter;
   $('model-count').textContent = models.length;
   $('results-description').textContent = `显示 ${models.length} / ${state.models.length} 个模型`;
-  $('history-title').textContent = `${state.hours} 小时记录`;
+  $('history-title').textContent = !state.group && noTimedHistory ? (hasUntimedHistory ? '近期记录（无时间）' : '历史记录') : `${state.hours} 小时记录`;
   if (!models.length) {
     const filtered = state.search || state.filter !== 'all' || state.family !== 'all';
     $('model-rows').innerHTML = `<tr><td colspan="8"><div class="empty-state"><span aria-hidden="true">⌕</span><h3>${filtered ? '没有符合筛选的模型' : '这个时段还没有统计记录'}</h3><p>${filtered ? '试试其他名称、系列或状态。' : '可以切换到更长的统计时段，或查看完整模型列表。'}</p><button class="button button-neutral" id="reset-filters">${filtered ? '清除筛选' : '查看全部模型'}</button></div></td></tr>`;
@@ -373,7 +379,9 @@ function render() {
     const rateClass = rateState(rate);
     const rateHtml = finite(rate) && rate >= 0 && rate <= 100 ? `<span class="rate-value ${rateClass}">${rate.toFixed(2)}<span class="unit">%</span></span>` : '<span class="no-value">—</span>';
     const endpoints = model.supported_endpoint_types?.join(' / ');
-    return `<tr class="model-row"${model.needsDetail ? ` data-hydrate="${escape(model.model_name)}"` : ''}><td><div class="model-cell">${favoriteButton(model.model_name)}${avatar(model.family)}<div><button class="model-link" data-model="${escape(model.model_name)}" title="${escape(model.model_name)}">${escape(model.model_name)}</button><div class="model-caption">${escape(model.family)}${state.group ? ' / ' + escape(state.group) : endpoints ? ' / ' + escape(endpoints) : ''}</div></div></div></td><td>${badge(model.state)}</td><td>${renderHistory(metric)}</td><td class="numeric">${rateHtml}</td><td class="numeric">${value(finite(metric?.avg_latency_ms) ? metric.avg_latency_ms / 1000 : null, 's')}</td><td class="numeric">${finite(metric?.avg_tps) && metric.avg_tps > 0 ? value(metric.avg_tps, 'tok/s', 1) : '<span class="no-value">—</span>'}</td><td class="time-cell" title="统计时段的开始时间，UTC+8；不是最后一次请求时间">${model.latest ? escape(fullFormat.format(model.latest * 1000)) : '<span class="no-value">—</span>'}</td><td><button class="row-detail" data-model="${escape(model.model_name)}" aria-label="查看 ${escape(model.model_name)} 详情">›</button></td></tr>`;
+    const recordLink = !state.group && metric && !validSeries(metric.recent_success_series, referenceNow).length
+      ? `<button class="history-record-button" data-model="${escape(model.model_name)}">查看分组记录</button>` : '';
+    return `<tr class="model-row"${model.needsDetail ? ` data-hydrate="${escape(model.model_name)}"` : ''}><td><div class="model-cell">${favoriteButton(model.model_name)}${avatar(model.family)}<div><button class="model-link" data-model="${escape(model.model_name)}" title="${escape(model.model_name)}">${escape(model.model_name)}</button><div class="model-caption">${escape(model.family)}${state.group ? ' / ' + escape(state.group) : endpoints ? ' / ' + escape(endpoints) : ''}</div></div></div></td><td>${badge(model.state)}</td><td>${renderHistory(metric)}${recordLink}</td><td class="numeric">${rateHtml}</td><td class="numeric">${value(finite(metric?.avg_latency_ms) ? metric.avg_latency_ms / 1000 : null, 's')}</td><td class="numeric">${finite(metric?.avg_tps) && metric.avg_tps > 0 ? value(metric.avg_tps, 'tok/s', 1) : '<span class="no-value">—</span>'}</td><td class="time-cell" title="统计时段的开始时间，UTC+8；不是最后一次请求时间">${model.latest ? escape(fullFormat.format(model.latest * 1000)) : '<span class="no-value">—</span>'}</td><td><button class="row-detail" data-model="${escape(model.model_name)}" aria-label="查看 ${escape(model.model_name)} 详情">›</button></td></tr>`;
   }).join('');
   observeGroupRows();
 }
