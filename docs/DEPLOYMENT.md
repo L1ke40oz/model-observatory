@@ -42,7 +42,7 @@ chmod 600 ~/.ssh/authorized_keys
 | `SSH_PORT` | VPS 的 SSH 端口，未设置时使用 `22`；不是 1Panel 网页面板端口 |
 | `SSH_USER` | 上一步创建密钥的登录用户，例如 `root` |
 | `SSH_PRIVATE_KEY` | `~/.ssh/model-observatory-actions` 的完整内容，包括 BEGIN / END 行 |
-| `SSH_KNOWN_HOSTS` | VPS 的 SSH 主机公钥，按下一段生成；与上面的登录公钥不同 |
+| `SSH_KNOWN_HOSTS` | VPS 的 SSH 主机公钥原始完整一行，按下一段复制；与上面的登录公钥不同 |
 
 只在终端查看私钥并直接粘贴到 GitHub Secret：
 
@@ -50,20 +50,17 @@ chmod 600 ~/.ssh/authorized_keys
 cat ~/.ssh/model-observatory-actions
 ```
 
-在服务器终端填入与 Secrets 完全相同的主机和端口，生成 `SSH_KNOWN_HOSTS`：
+在 **1Panel 的服务器终端**执行：
 
 ```sh
-read -r -p 'SSH_HOST（公网 IP 或 SSH 域名）: ' observatory_host
-read -r -p 'SSH_PORT（回车默认 22）: ' observatory_port
-observatory_port=${observatory_port:-22}
-observatory_known_host=$observatory_host
-if [ "$observatory_port" != 22 ]; then
-  observatory_known_host="[$observatory_host]:$observatory_port"
-fi
-awk -v host="$observatory_known_host" '{print host " " $1 " " $2}' /etc/ssh/ssh_host_ed25519_key.pub
+cat /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
-把输出的一整行填入 `SSH_KNOWN_HOSTS`。它来自服务器自身的主机公钥，工作流会严格校验，不会在连接时自动信任未知主机。如果 sshd 自定义了主机密钥路径，使用其实际生效的主机公钥文件。
+把输出的完整一行（`ssh-ed25519 AAAA...`，末尾可能有主机注释）直接填入 `SSH_KNOWN_HOSTS`。工作流根据 `SSH_HOST` 和 `SSH_PORT` 自动拼接 known_hosts 格式，也兼容旧的完整 known_hosts 行，不需要手工添加 IP、方括号或端口。
+
+工作流仍会严格验证服务器提供的密钥与该公钥一致。如果 sshd 自定义了主机密钥路径，使用其实际生效的主机公钥文件。不要复制 `~/.ssh/model-observatory-actions.pub`，那是用于登录的另一把公钥。
+
+修改工作流之后，从 **Actions → Check and deploy → Run workflow → main** 启动新运行；旧运行的 Re-run 仍使用旧工作流版本。
 
 ## 4. 首次运行
 
