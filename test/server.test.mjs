@@ -15,14 +15,20 @@ before(async () => {
 });
 after(() => child?.kill());
 const post = (path, data, headers = {}) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(data) });
+
+test('empty defaults start without exposing a site or querying an implicit upstream', async () => {
+  assert.deepEqual((await (await fetch(base + '/api/sites')).json()).sites, []);
+  assert.equal((await fetch(base + '/api/overview')).status, 400);
+  assert.equal((await fetch(base + '/api/detail?model=anything')).status, 400);
+});
 test('personal site registration cannot create a server-side shared list', async () => {
-  assert.equal((await post('/api/sites', { site: { url: 'https://private.luminestella.top' } })).status, 405);
+  assert.equal((await post('/api/sites', { site: { url: 'https://private.example.org' } })).status, 405);
   const { sites } = await (await fetch(base + '/api/sites')).json();
-  assert.ok(sites.every(site => site.url !== 'https://private.luminestella.top'));
+  assert.ok(sites.every(site => site.url !== 'https://private.example.org'));
 });
 test('custom proxy rejects private origins and unsupported paths before making requests', async () => {
-  for (const url of ['https://127.0.0.1', 'http://api.luminestella.top', 'https://169.254.169.254', 'https://api.luminestella.top?token=secret']) assert.equal((await post('/api/overview', { site: { url }, hours: 24 })).status, 400);
-  assert.equal((await post('/api/overview', { site: { url: 'https://api.luminestella.top' }, hours: 999 })).status, 400);
-  assert.equal((await post('/api/overview', { site: { url: 'https://api.luminestella.top' } }, { Origin: 'https://other-site.invalid' })).status, 403);
+  for (const url of ['https://127.0.0.1', 'http://api.example.org', 'https://169.254.169.254', 'https://api.example.org?token=secret']) assert.equal((await post('/api/overview', { site: { url }, hours: 24 })).status, 400);
+  assert.equal((await post('/api/overview', { site: { url: 'https://api.example.org' }, hours: 999 })).status, 400);
+  assert.equal((await post('/api/overview', { site: { url: 'https://api.example.org' } }, { Origin: 'https://other-site.invalid' })).status, 403);
   assert.equal((await fetch(base + '/api/overview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' })).status, 400);
 });

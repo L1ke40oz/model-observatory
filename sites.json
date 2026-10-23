@@ -1,9 +1,1 @@
-[
-  {
-    "id": "luminestella",
-    "name": "LumineStella",
-    "url": "https://api.luminestella.top",
-    "description": "API 中转站",
-    "adapter": "new-api"
-  }
-]
+[]

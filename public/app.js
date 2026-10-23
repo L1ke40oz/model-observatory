@@ -497,6 +497,7 @@ $('window-controls').addEventListener('click', event => {
     loadFavorites(); return;
   }
   for (const item of $('window-controls').children) { item.classList.toggle('active', item === button); item.setAttribute('aria-pressed', String(item === button)); }
+  if (!state.site) { selectSite(null); return; }
   // Clear the previous window immediately so its values cannot be mislabeled.
   state.data = null;
   state.models = [];
@@ -513,6 +514,7 @@ $('site-nav').addEventListener('click', event => {
   if (button && (state.view !== 'overview' || state.site !== button.dataset.site)) { siteManager?.rememberSelection(button.dataset.site); selectSite(button.dataset.site); }
 });
 function selectSite(id) {
+  $('favorites-count').textContent = favorites.items.length;
   favoriteController?.abort();
   favoriteGeneration++;
   setView('overview');
@@ -545,6 +547,8 @@ function selectSite(id) {
     $('distribution').innerHTML = '';
     $('nav-total').textContent = '0';
     $('model-count').textContent = '0';
+    $('history-title').textContent = `${state.hours} 小时记录`;
+    $('summary-scope').textContent = '最新统计状态分布';
     $('group-tabs').innerHTML = '<button class="active" data-group="" aria-pressed="true">全部分组</button>';
     $('group-progress').textContent = '';
     $('sync-dot').className = 'sync-dot loading';
@@ -614,6 +618,7 @@ setInterval(() => {
     }
     if (aged) renderFavorites();
   }
+  if (!state.site && state.view === 'overview') { $('next-refresh').textContent = '添加站点后自动同步'; return; }
   if (state.interval === 0) { $('next-refresh').textContent = '已暂停自动同步'; return; }
   const remaining = Math.max(0, Math.ceil((state.nextRefresh - Date.now()) / 1000));
   $('next-refresh').textContent = state.busy ? '正在同步…' : `${remaining} 秒后自动同步`;
@@ -625,7 +630,7 @@ async function init() {
     const response = await fetch('/api/sites', { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error('sites missing');
     const data = await response.json();
-    siteManager = new SiteManager(data.sites, (sites, selectedId) => { state.sites = sites; selectSite(selectedId); });
+    siteManager = new SiteManager(data.sites, (sites, selectedId) => { state.sites = sites; selectSite(selectedId); }, favorites);
     state.sites = siteManager.sites;
     const selected = state.sites.find(site => site.url === siteManager.selectedUrl) || state.sites[0];
     selectSite(selected?.id);

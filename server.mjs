@@ -14,7 +14,7 @@ const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 256;
 const MAX_CONCURRENT = 12;
 const rawSites = JSON.parse(await readFile(path.join(root, 'sites.json'), 'utf8'));
-if (!Array.isArray(rawSites) || !rawSites.length) throw new Error('sites.json must contain at least one site');
+if (!Array.isArray(rawSites)) throw new Error('sites.json must contain an array');
 const sites = rawSites.map(site => {
   const url = new URL(site.url);
   if (!/^[a-z0-9-]{1,64}$/.test(site.id) || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || !['', '/'].includes(url.pathname) || site.adapter !== 'new-api') {
@@ -98,6 +98,7 @@ const assets = new Map([
   ['/site-config.js', ['site-config.js', 'text/javascript; charset=utf-8']],
   ['/site-manager.js', ['site-manager.js', 'text/javascript; charset=utf-8']],
   ['/favorites.js', ['favorites.js', 'text/javascript; charset=utf-8']],
+  ['/backup.js', ['backup.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/icon.jpg', ['icon.jpg', 'image/jpeg']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]
@@ -132,7 +133,7 @@ const server = http.createServer(async (req, res) => {
     if (proxyRoute) {
       const body = req.method === 'POST' ? await readBody(req) : null;
       let site;
-      try { site = body ? normalizeSite(body.site, 'custom') : sites.find(s => s.id === (url.searchParams.get('site') || sites[0].id)); }
+      try { site = body ? normalizeSite(body.site, 'custom') : sites.find(s => s.id === (url.searchParams.get('site') || sites[0]?.id)); }
       catch (error) { return json(res, 400, { error: 'INVALID_SITE', message: error.message }); }
       const hours = String(body?.hours ?? url.searchParams.get('hours') ?? '24');
       if (!site || !allowedHours.has(hours)) return json(res, 400, { error: 'INVALID_QUERY' });
