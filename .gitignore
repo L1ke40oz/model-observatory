@@ -1,0 +1,9 @@
+node_modules/
+.playwright-cli/
+output/
+*.zip
+.env
+.env.*
+*.db
+*.db-*
+model-observatory-sites*.json

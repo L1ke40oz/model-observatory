@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="聚合 API 站点公开统计，查看模型近期状态和请求成功率。">
+  <meta name="theme-color" content="#f4f7fb">
+  <title>模型状态</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="模型状态首页"><img src="/favicon.svg" alt="" width="36" height="36"><span>stella<span class="brand-sub">模型状态</span></span></a>
+    <div class="workspace-label">列表</div>
+    <button class="nav-item selected" id="overview-nav"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模型总览<span class="nav-count" id="nav-total">—</span></button>
+    <div class="section-label">我的站点 <span id="site-count">1</span></div>
+    <div id="site-nav" class="site-nav"><span class="skeleton-line">正在读取站点…</span></div>
+    <button class="manage-sites-button" id="manage-sites">＋ 管理站点</button>
+    <select id="mobile-sites" class="mobile-sites" aria-label="选择站点"></select>
+    <div class="sidebar-invite"><span class="small-orbit" aria-hidden="true">✧</span><strong>本机保存</strong><p>站点列表保存在浏览器。<br>可导出配置进行备份。</p><button class="text-button" id="connect-help">站点接入说明 <span aria-hidden="true">＋</span></button></div>
+    <div class="sidebar-bottom"><span class="readonly-icon" aria-hidden="true">↙</span><div>公开统计同步<span>无需 API Key</span></div><button class="icon-button" id="about" aria-label="查看统计说明">?</button></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div class="breadcrumb">列表 <span>/</span> <strong>模型总览</strong></div><div class="topbar-right"><span class="sync-dot" id="sync-dot"></span><span id="sync-label">等待同步</span><span class="timezone">UTC+8</span></div></header>
+    <main>
+      <section class="page-heading"><div><h1>模型状态<span class="heading-star" aria-hidden="true">✦</span></h1><p>根据站点公开统计查看模型近期状态。</p></div><div class="refresh-controls"><label class="interval-control"><span class="refresh-icon" aria-hidden="true">↻</span><select id="interval" aria-label="自动刷新间隔"><option value="30">每 30 秒刷新</option><option value="60">每 60 秒刷新</option><option value="0">手动刷新</option></select></label><button class="button button-primary" id="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 18 17"/></svg><span>立即刷新</span></button></div></section>
+      <div id="notice" class="notice" hidden role="status"></div>
+      <section class="station-panel" aria-label="站点概况"><div class="station-info"><div class="station-logo" aria-hidden="true">✧</div><div><div class="station-title"><h2 id="station-name">LumineStella</h2><span class="source-badge">New API</span></div><a id="station-url" href="https://api.luminestella.top/pricing" target="_blank" rel="noopener noreferrer">api.luminestella.top <span aria-hidden="true">↗</span></a></div><div class="station-sync" id="station-sync">正在同步公开统计</div></div><div class="station-summary"><div class="summary-caption"><span>最新统计状态分布</span><button class="text-button" id="status-help">如何判断状态 <span class="tiny-question">?</span></button></div><div class="status-distribution" id="distribution" aria-label="等待统计数据"><span class="distribution-loading"></span></div><div class="summary-counts" id="summary-counts"><span class="loading-text">正在读取模型数据…</span></div></div></section>
+      <section class="models-section" aria-labelledby="models-title"><div class="models-heading"><div class="models-title"><h2 id="models-title">模型一览</h2><span id="model-count" class="count-pill">—</span></div><div class="window-control"><span>统计时段</span><div class="segmented" id="window-controls" role="group" aria-label="统计时段"><button data-hours="1" aria-pressed="false">1 小时</button><button data-hours="6" aria-pressed="false">6 小时</button><button data-hours="24" class="active" aria-pressed="true">24 小时</button></div></div></div>
+        <div class="table-panel"><div class="filter-row"><div class="family-tabs" id="family-tabs" role="group" aria-label="模型系列"><button class="active" data-family="all" aria-pressed="true">全部系列</button></div><label class="search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" placeholder="搜索模型名称…" aria-label="搜索模型名称" autocomplete="off"><kbd>/</kbd></label></div>
+        <div class="filter-subrow"><label class="recorded-toggle"><input type="checkbox" id="recorded-only" checked><span class="switch-track"></span>只看有统计的模型</label><div class="status-select"><label for="state-filter">状态</label><select id="state-filter"><option value="all">全部状态</option><option value="healthy">近期正常</option><option value="degraded">成功率偏低</option><option value="failed">近期失败</option><option value="stale">仅历史数据</option><option value="unknown">暂无数据</option><option value="interrupted">同步中断</option></select></div><div id="results-description" class="results-description" aria-live="polite"></div></div>
+        <div class="table-scroll"><table><thead><tr><th scope="col" class="model-col"><button id="sort-name" class="sort-button">模型名称 <span aria-hidden="true">↕</span></button></th><th scope="col">近期状态</th><th scope="col" class="history-col"><span id="history-title">24 小时记录</span></th><th scope="col" class="numeric"><button id="sort-rate" class="sort-button">请求成功率 <span aria-hidden="true">↕</span></button></th><th scope="col" class="numeric">平均耗时</th><th scope="col" class="numeric">输出速度</th><th scope="col" class="last-col">最近统计时段</th><th scope="col"><span class="sr-only">详情</span></th></tr></thead><tbody id="model-rows"><tr><td colspan="8"><div class="empty-state"><span class="loading-orbit" aria-hidden="true">✧</span><h3>正在读取模型数据…</h3><p>正在获取站点公开的模型列表与请求统计。</p></div></td></tr></tbody></table></div>
+        <div class="table-footer"><div class="legend"><span><i class="dot healthy"></i>正常</span><span><i class="dot degraded"></i>偏低</span><span><i class="dot failed"></i>失败</span><span><i class="dot unknown"></i>无记录</span></div><span>色条表示统计时段内的请求成功率</span></div></div>
+      </section>
+      <footer class="page-footer"><p><span class="info-icon">i</span>状态根据站点请求统计计算；暂无近期数据不代表模型不可用。<button class="text-button" id="footer-help">统计说明</button></p><span id="next-refresh">下次同步 —</span></footer>
+    </main>
+  </div>
+  <dialog id="info-dialog" class="info-dialog"><div class="dialog-top"><span class="dialog-eyebrow">使用说明</span><button class="icon-button close-dialog" aria-label="关闭">×</button></div><div id="info-content"></div><button class="button button-primary dialog-confirm close-dialog">知道了</button></dialog>
+  <dialog id="detail-dialog" class="detail-dialog"><div class="dialog-top"><span class="dialog-eyebrow">模型详情</span><button class="icon-button close-dialog" aria-label="关闭">×</button></div><div id="detail-content"></div></dialog>
+  <dialog id="sites-dialog" class="sites-dialog"></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <noscript><p class="noscript">请启用 JavaScript 以读取模型统计。</p></noscript>
+</body>
+</html>
