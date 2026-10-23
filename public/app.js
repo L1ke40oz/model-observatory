@@ -7,6 +7,12 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hour12: false });
 const fullFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 const clockFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const liveClockFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Singapore', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+function updateLiveClock() {
+  const date = new Date();
+  $('live-clock').dateTime = date.toISOString();
+  $('live-clock').textContent = liveClockFormat.format(date);
+}
 const stateOrder = ['healthy', 'degraded', 'failed', 'stale', 'unknown', 'interrupted'];
 const familyOrder = ['Claude', 'GPT', 'Gemini', 'DeepSeek', 'Qwen', 'GLM', 'Kimi', '其他'];
 const symbols = { Claude: '✳', GPT: '◎', Gemini: '✦', DeepSeek: '≈', Qwen: 'Q', GLM: 'G', Kimi: 'K', '其他': '◇' };
@@ -50,12 +56,8 @@ function showToast(message) {
   showToast.timer = setTimeout(() => { $('toast').hidden = true; }, 2800);
 }
 
-function showInfo(kind = 'status') {
-  if (kind === 'connect') {
-    $('info-content').innerHTML = `<h2>站点接入说明</h2><p>在“管理站点”中填写名称和 HTTPS 站点地址，即可添加提供公开统计接口的 New API 站点。</p><div class="explain-list"><div class="explain-row"><span class="site-mini-icon">＋</span><span>支持添加、编辑和移除站点，无需注册或填写 API Key。</span></div><div class="explain-row"><span class="site-mini-icon">↙</span><span>列表保存在当前浏览器，换设备时可导出、导入配置。</span></div></div><p class="info-note">查询时，站点地址会发送给本站服务器以获取公开统计。服务器不保存用户站点列表。清除浏览器数据会移除本机配置，共用同一浏览器的人可能看到该列表。</p>`;
-  } else {
+function showInfo() {
     $('info-content').innerHTML = `<h2>状态说明</h2><p>${state.interval ? `每 ${state.interval} 秒同步站点公开统计` : '当前已暂停自动同步，可点击“立即刷新”读取统计'}。近期状态根据最近一个统计时段的请求成功率计算，分类阈值由本页面设定。</p><div class="explain-list"><div class="explain-row">${badge('healthy')}<span>最近统计时段的请求成功率 ≥ 95%。</span></div><div class="explain-row">${badge('degraded')}<span>最近统计时段的请求成功率大于 0%、低于 95%。</span></div><div class="explain-row">${badge('failed')}<span>最近统计时段的请求成功率为 0%。</span></div><div class="explain-row">${badge('stale')}<span>最近统计时段的开始时间距现在已满 2 小时。</span></div><div class="explain-row">${badge('unknown')}<span>所选时段内没有可用的统计记录。</span></div><div class="explain-row">${badge('interrupted')}<span>读取统计失败，保留上次读取的数据。</span></div></div><p class="info-note">表格中的请求成功率、耗时和速度是所选时段的汇总；“近期状态”按最近一个统计时段判断。统计时段显示的是开始时间，不是最后一次请求时间。页面只读取统计，不发起模型请求。没有近期数据不代表模型不可用。</p>`;
-  }
   $('info-dialog').showModal();
 }
 
@@ -77,7 +79,7 @@ function render() {
   const recordedCount = state.models.filter(model => model.metric).length;
   $('nav-total').textContent = state.models.length;
   const latestFetch = data.metrics.fetchedAt;
-  $('sync-label').textContent = latestFetch ? `更新于 ${clockFormat.format(latestFetch)}` : '尚未取得统计';
+  $('sync-dot').title = latestFetch ? `统计获取时间：${clockFormat.format(latestFetch)}` : '尚未取得统计';
   $('sync-dot').className = 'sync-dot' + (data.metrics.error || data.catalog.error ? ' error' : '');
   $('station-sync').textContent = `模型列表 ${catalogCount} 个 / 有统计 ${recordedCount} 个`;
   const notices = [];
@@ -126,6 +128,7 @@ async function loadData(manual = false) {
   $('refresh').disabled = true;
   $('refresh').querySelector('span').textContent = '同步中';
   $('sync-dot').className = 'sync-dot loading';
+  $('sync-dot').title = '正在获取统计';
   try {
     state.controller = new AbortController();
     const response = await fetch('/api/overview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ site: { name: selectedSite.name, url: selectedSite.url }, hours: state.hours }), signal: AbortSignal.any([state.controller.signal, AbortSignal.timeout(22_000)]), cache: 'no-store' });
@@ -151,7 +154,7 @@ async function loadData(manual = false) {
       $('notice').textContent = '读取服务连接失败。页面将按所选间隔重试，也可以点击“立即刷新”。';
     }
     $('sync-dot').className = 'sync-dot error';
-    $('sync-label').textContent = '同步中断';
+    $('sync-dot').title = '统计同步中断';
   } finally {
     if (request === state.loadRequest) {
       state.busy = false;
@@ -247,7 +250,8 @@ function selectSite(id) {
     $('distribution').innerHTML = '';
     $('nav-total').textContent = '0';
     $('model-count').textContent = '0';
-    $('sync-label').textContent = '等待添加站点';
+    $('sync-dot').className = 'sync-dot loading';
+    $('sync-dot').title = '等待添加站点';
     $('model-rows').innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>添加一个 API 站点</h3><p>站点列表只保存在当前浏览器。</p><button class="button button-primary" id="empty-add-site">管理站点</button></div></td></tr>';
     return;
   }
@@ -274,8 +278,7 @@ function resetFilters() {
   $('search').value = ''; $('recorded-only').checked = false; render();
 }
 $('overview-nav').addEventListener('click', resetFilters);
-for (const id of ['status-help', 'footer-help', 'about']) $(id).addEventListener('click', () => showInfo());
-$('connect-help').addEventListener('click', () => showInfo('connect'));
+for (const id of ['status-help', 'footer-help']) $(id).addEventListener('click', () => showInfo());
 for (const button of document.querySelectorAll('.close-dialog')) button.addEventListener('click', () => button.closest('dialog').close());
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => {
   if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); }
@@ -283,8 +286,9 @@ for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListene
 document.addEventListener('keydown', event => {
   if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); $('search').focus(); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.interval && Date.now() >= state.nextRefresh) loadData(); });
+document.addEventListener('visibilitychange', () => { updateLiveClock(); if (!document.hidden && state.interval && Date.now() >= state.nextRefresh) loadData(); });
 setInterval(() => {
+  updateLiveClock();
   // Also age statuses while automatic fetching is paused.
   if (state.data && state.models.some(model => model.state !== classify(model.metric, now(), Boolean(state.data.metrics.error)))) render();
   if (state.interval === 0) { $('next-refresh').textContent = '已暂停自动同步'; return; }
@@ -310,4 +314,5 @@ async function init() {
     $('refresh').onclick = () => location.reload();
   }
 }
+updateLiveClock();
 init();

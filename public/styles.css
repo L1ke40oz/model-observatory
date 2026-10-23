@@ -15,3 +15,7 @@ dialog{border:1px solid #e3e9f3;border-radius:15px;color:var(--ink);background:w
 @media(max-width:900px) and (min-width:601px){.manage-sites-button{font-size:0;padding:10px;text-align:center}.manage-sites-button::before{content:"＋";font-size:20px}.site-nav{max-height:45vh}}
 @media(max-width:600px){.sidebar{gap:9px}.site-nav{display:none}.manage-sites-button{font-size:10px;padding:6px 8px;margin:0 0 0 auto;white-space:nowrap;order:3}.mobile-sites{display:block;margin-left:auto;max-width:135px;min-width:0;border:1px solid #e4eaf5;border-radius:6px;background:#f7f9fe;color:#61799f;font-size:10px;padding:6px;order:2}.sites-dialog{padding:20px}.manager-site{gap:10px}.manager-list{max-height:180px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Brand and current-time display. */
+.brand>span{font-size:22px;letter-spacing:0;white-space:nowrap}#live-clock{white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:600px){.brand{flex-shrink:0;gap:8px}.brand>span{font-size:17px}.brand img{width:26px;height:26px}.mobile-sites{flex:1;width:0;max-width:135px;margin-left:auto}.manage-sites-button{flex-shrink:0;margin-left:0}.topbar{gap:10px}.topbar-right{flex-shrink:0}}
