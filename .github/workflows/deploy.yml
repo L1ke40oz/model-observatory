@@ -1,0 +1,79 @@
+name: Check and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check application
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm run check
+      - run: npm test
+      - name: Validate deployment script
+        run: bash -n scripts/deploy.sh
+      - name: Build and verify container
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker compose logs --tail=50; docker compose down' EXIT
+          docker compose config --quiet
+          docker compose up -d --build --wait --wait-timeout 90
+          curl --fail --silent --show-error http://127.0.0.1:8787/api/health
+
+  deploy:
+    name: Deploy VPS
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: model-observatory-production
+      cancel-in-progress: false
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Deploy using restricted SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          for setting in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            if [ -z "${!setting}" ]; then
+              echo "::error::Configure the $setting repository secret first. See docs/DEPLOYMENT.md."
+              exit 1
+            fi
+          done
+          if [[ ! "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$SSH_PORT < 1 || 10#$SSH_PORT > 65535 )); then
+            echo '::error::SSH_PORT must be between 1 and 65535.'
+            exit 1
+          fi
+          [[ "$SSH_HOST" != -* && "$SSH_USER" != -* ]]
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -f "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$ssh_dir/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" | tr -d '\r' > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          ssh -T -p "$SSH_PORT" -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+            "$SSH_USER@$SSH_HOST" "$GITHUB_SHA"

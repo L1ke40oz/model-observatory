@@ -52,6 +52,8 @@ docker compose up -d --build
 
 源码更新和容器重建不会删除浏览器中的列表。浏览器保存的数据按访问域名、协议和端口区分，更换网址前请先导出配置。
 
+支持 GitHub Actions 自动部署：推送 `main` 后先检查、测试并构建容器，通过后再更新 VPS。首次需要安装部署命令并设置仓库 SSH Secrets，见 [自动部署说明](docs/DEPLOYMENT.md)。
+
 ## 本地运行
 
 需要 Node.js 22+，无需 npm install：
