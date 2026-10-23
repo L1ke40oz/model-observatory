@@ -82,7 +82,7 @@ async function overview(site, hours) {
     const data = {
       site, hours: Number(hours), refreshSeconds: TTL / 1000,
       serverTime: Date.now(),
-      catalog: { models: catalog.payload?.data || [], fetchedAt: catalog.fetchedAt, error: catalog.error },
+      catalog: { models: catalog.payload?.data || [], groups: [...new Set([...Object.keys(catalog.payload?.usable_group || {}), ...(catalog.payload?.data || []).flatMap(model => Array.isArray(model.enable_groups) ? model.enable_groups.filter(group => typeof group === 'string') : [])])], fetchedAt: catalog.fetchedAt, error: catalog.error },
       metrics: { models: metrics.payload?.data?.models || [], fetchedAt: metrics.fetchedAt, error: metrics.error }
     };
     return data;
