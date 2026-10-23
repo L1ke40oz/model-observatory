@@ -97,6 +97,7 @@ const assets = new Map([
   ['/model-state.js', ['model-state.js', 'text/javascript; charset=utf-8']],
   ['/site-config.js', ['site-config.js', 'text/javascript; charset=utf-8']],
   ['/site-manager.js', ['site-manager.js', 'text/javascript; charset=utf-8']],
+  ['/favorites.js', ['favorites.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']]
 ]);

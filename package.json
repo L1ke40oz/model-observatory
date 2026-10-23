@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "node --check server.mjs && node --check lib/public-request.mjs && node --check public/app.js && node --check public/model-state.js && node --check public/site-config.js && node --check public/site-manager.js"
+    "check": "node --check server.mjs && node --check lib/public-request.mjs && node --check public/app.js && node --check public/model-state.js && node --check public/site-config.js && node --check public/site-manager.js && node --check public/favorites.js"
   },
   "engines": { "node": ">=22" }
 }

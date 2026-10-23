@@ -1,5 +1,6 @@
 import { labels, finite, validSeries, rateState, mergeModels, classify, normalizeMetric, recentRates } from './model-state.js';
 import { SiteManager } from './site-manager.js';
+import { Favorites, favoriteKey, favoriteResult } from './favorites.js';
 let siteManager;
 
 const $ = id => document.getElementById(id);
@@ -16,7 +17,13 @@ function updateLiveClock() {
 const stateOrder = ['healthy', 'degraded', 'failed', 'stale', 'untimed', 'summary', 'loading', 'unknown', 'interrupted'];
 const familyOrder = ['Claude', 'GPT', 'Gemini', 'DeepSeek', 'Qwen', 'GLM', 'Kimi', '其他'];
 const symbols = { Claude: '✳', GPT: '◎', Gemini: '✦', DeepSeek: '≈', Qwen: 'Q', GLM: 'G', Kimi: 'K', '其他': '◇' };
-const state = { sites: [], site: null, group: '', hours: 24, family: 'all', filter: 'all', search: '', recorded: true, sort: 'default', data: null, models: [], busy: false, interval: 30, nextRefresh: 0, serverTime: Date.now(), receivedAt: performance.now(), detailRequest: 0, loadRequest: 0 };
+const state = { view: 'overview', sites: [], site: null, group: '', hours: 24, family: 'all', filter: 'all', search: '', recorded: true, sort: 'default', data: null, models: [], busy: false, interval: 30, nextRefresh: 0, serverTime: Date.now(), receivedAt: performance.now(), detailRequest: 0, loadRequest: 0 };
+let favorites;
+try { favorites = new Favorites(localStorage); }
+catch { favorites = new Favorites({ getItem: () => null, setItem: () => { throw new Error('STORAGE_UNAVAILABLE'); } }); favorites.error = true; }
+const favoriteRows = new Map();
+let favoriteController;
+let favoriteGeneration = 0;
 const details = new Map();
 const detailRequests = new Map();
 const detailQueue = [];
@@ -30,6 +37,158 @@ function value(value, unit, digits = 2) { return finite(value) && value >= 0 ? `
 const time = ts => finite(ts) ? timeFormat.format(ts) : '—';
 const avatar = family => `<span class="model-avatar ${family.toLowerCase()}">${symbols[family] || '◇'}</span>`;
 const detailKey = (name, site = state.sites.find(site => site.id === state.site), hours = state.hours) => JSON.stringify([site?.url, hours, name]);
+
+function currentFavorite(model) {
+  return { url: state.sites.find(site => site.id === state.site)?.url, model, group: state.group };
+}
+
+function favoriteButton(name) {
+  const item = currentFavorite(name);
+  const selected = favorites.has(item);
+  const label = `${selected ? '取消关注' : '关注'} ${name}（${item.group || '全部分组'}）`;
+  return `<button class="favorite-button${selected ? ' followed' : ''}" data-favorite="${escape(name)}" aria-pressed="${selected}" aria-label="${escape(label)}" title="${escape(label)}">${selected ? '★' : '☆'}</button>`;
+}
+
+function toggleFavorite(item) {
+  try {
+    const selected = favorites.toggle(item);
+    $('favorites-count').textContent = favorites.items.length;
+    if (!selected) favoriteRows.delete(favoriteKey(item));
+    render();
+    showToast(selected ? '已关注，可在“关注的模型”中查看' : '已取消关注');
+  } catch { showToast(favorites.items.length >= 300 && !favorites.has(item) ? '最多关注 300 个模型，请先取消部分关注' : '保存失败，请检查浏览器存储空间和权限'); }
+}
+
+function setView(view) {
+  state.view = view;
+  const followed = view === 'favorites';
+  window.history.replaceState(null, '', followed ? '#favorites' : location.pathname + location.search);
+  $('overview-nav').classList.toggle('selected', !followed);
+  $('favorites-nav').classList.toggle('selected', followed);
+  $('overview-nav').setAttribute('aria-current', String(!followed));
+  $('favorites-nav').setAttribute('aria-current', String(followed));
+  for (const button of document.querySelectorAll('[data-view]')) { button.classList.toggle('active', button.dataset.view === view); button.setAttribute('aria-pressed', String(button.dataset.view === view)); }
+  $('view-name').textContent = followed ? '关注的模型' : '模型总览';
+  $('page-title').textContent = followed ? '关注的模型' : '模型状态';
+  $('page-description').textContent = followed ? '集中查看已关注模型的公开统计。' : '根据站点公开统计查看模型近期状态。';
+  $('models-title').textContent = followed ? '关注列表' : '模型一览';
+  document.querySelector('.station-panel').hidden = followed;
+  for (const selector of ['.filter-row', '.group-filter-row', '.filter-subrow']) document.querySelector(selector).hidden = followed;
+  $('favorites-note').hidden = !followed;
+  $('sort-name').disabled = followed;
+  $('sort-rate').disabled = followed;
+  $('notice').hidden = true;
+}
+
+function openFavorites() {
+  if (state.view === 'favorites') return;
+  state.controller?.abort();
+  state.loadRequest++;
+  state.detailRequest++;
+  state.busy = false;
+  historyObserver?.disconnect();
+  setView('favorites');
+  loadFavorites();
+}
+
+function renderFavorites() {
+  $('model-count').textContent = favorites.items.length;
+  $('history-title').textContent = `${state.hours} 小时记录`;
+  $('favorites-count').textContent = favorites.items.length;
+  if (!favorites.items.length) {
+    $('model-rows').innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>还没有关注的模型</h3><p>在模型总览中点击模型旁的 ☆，即可在这里查看。</p><button class="button button-neutral" data-favorite-overview>查看模型总览</button></div></td></tr>';
+    return;
+  }
+  $('model-rows').innerHTML = favorites.items.map(item => {
+    const key = favoriteKey(item);
+    const site = state.sites.find(site => site.url === item.url);
+    const result = site ? favoriteRows.get(key) || { state: 'loading' } : { state: 'unknown', note: '站点已移除，重新添加后恢复同步' };
+    const metric = result.metric;
+    const rate = metric?.success_rate;
+    const label = `取消关注 ${item.model}（${new URL(item.url).hostname} / ${item.group || '全部分组'}）`;
+    return `<tr class="model-row favorite-row"><td><div class="model-cell"><button class="favorite-button followed" data-favorite="${escape(key)}" aria-pressed="true" aria-label="${escape(label)}" title="${escape(label)}">★</button><div><strong class="favorite-model-name">${escape(item.model)}</strong><div class="favorite-site">${escape(site?.name || new URL(item.url).hostname)}</div><div class="model-caption">${escape(new URL(item.url).hostname)} / ${escape(item.group || '全部分组')}</div></div></div></td><td>${badge(result.state)}${result.note ? `<div class="favorite-row-note">${escape(result.note)}</div>` : ''}</td><td>${result.state === 'loading' ? '<span class="history-empty">正在读取统计…</span>' : renderHistory(metric)}</td><td class="numeric">${finite(rate) && rate >= 0 && rate <= 100 ? `<span class="rate-value ${rateState(rate)}">${rate.toFixed(2)}<span class="unit">%</span></span>` : '—'}</td><td class="numeric">${value(finite(metric?.avg_latency_ms) ? metric.avg_latency_ms / 1000 : null, 's')}</td><td class="numeric">${metric?.avg_tps > 0 ? value(metric.avg_tps, 'tok/s', 1) : '—'}</td><td class="time-cell">${result.latest ? escape(fullFormat.format(result.latest * 1000)) : '—'}</td><td>${site ? `<button class="row-detail" data-favorite-open="${escape(key)}" aria-label="在站点中查看 ${escape(item.model)}" title="在站点中查看">›</button>` : ''}</td></tr>`;
+  }).join('');
+}
+
+async function loadFavorites(manual = false) {
+  if (state.busy) return;
+  const generation = ++favoriteGeneration;
+  favoriteController?.abort();
+  favoriteController = new AbortController();
+  const controller = favoriteController;
+  const hours = state.hours;
+  const items = [...favorites.items];
+  favoriteRows.clear();
+  state.busy = true;
+  $('refresh').disabled = true;
+  $('refresh').querySelector('span').textContent = '同步中';
+  $('sync-dot').className = 'sync-dot loading';
+  renderFavorites();
+  const tasks = [];
+  let failed = false;
+  let latestFetch = 0;
+  const current = () => generation === favoriteGeneration && state.view === 'favorites';
+  const post = async (path, body) => {
+    const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(22_000)]), cache: 'no-store' });
+    if (!response.ok) throw new Error('FETCH_FAILED');
+    return response.json();
+  };
+  for (const url of new Set(items.map(item => item.url))) {
+    const savedSite = state.sites.find(site => site.url === url);
+    if (!savedSite) continue;
+    const site = { name: savedSite.name, url };
+    const siteItems = items.filter(item => item.url === url);
+    tasks.push(async () => {
+      try {
+        const data = await post('/api/overview', { site, hours });
+        if (!current()) return;
+        failed ||= Boolean(data.catalog.error || data.metrics.error);
+        latestFetch = Math.max(latestFetch, data.metrics.fetchedAt || 0);
+        const grouped = new Map();
+        const knownModels = new Set([...(data.catalog.models || []), ...(data.metrics.models || [])].map(model => model.model_name));
+        for (const item of siteItems) {
+          if (!item.group || !knownModels.has(item.model)) favoriteRows.set(favoriteKey(item), favoriteResult(item, data));
+          else {
+            if (!grouped.has(item.model)) grouped.set(item.model, []);
+            grouped.get(item.model).push(item);
+          }
+        }
+        // Reuse one detail response for all followed groups of the same site/model.
+        for (const [model, groupItems] of grouped) tasks.push(async () => {
+          let detail;
+          try { detail = await post('/api/detail', { site, hours, model }); }
+          catch { detail = { error: 'FETCH_FAILED' }; }
+          if (!current()) return;
+          failed ||= Boolean(detail.error);
+          latestFetch = Math.max(latestFetch, detail.fetchedAt || 0);
+          for (const item of groupItems) favoriteRows.set(favoriteKey(item), favoriteResult(item, data, detail));
+          renderFavorites();
+        });
+        renderFavorites();
+      } catch {
+        if (!current()) return;
+        failed = true;
+        for (const item of siteItems) favoriteRows.set(favoriteKey(item), { state: 'interrupted', note: '站点统计读取失败，请稍后刷新' });
+        renderFavorites();
+      }
+    });
+  }
+  // Four shared workers bound requests across both sites and model groups.
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(4, tasks.length) }, async () => {
+    while (current() && cursor < tasks.length) await tasks[cursor++]();
+  }));
+  if (!current()) return;
+  state.busy = false;
+  state.nextRefresh = Date.now() + state.interval * 1000;
+  $('refresh').disabled = false;
+  $('refresh').querySelector('span').textContent = '立即刷新';
+  $('sync-dot').className = 'sync-dot' + (failed ? ' error' : '');
+  $('sync-dot').title = latestFetch ? `统计获取时间：${clockFormat.format(latestFetch)}${failed ? '；部分同步失败' : ''}` : '尚未取得统计';
+  $('notice').hidden = !failed;
+  $('notice').textContent = '部分统计读取失败，请查看各模型的状态提示，或稍后刷新。';
+  if (manual) showToast(failed ? '部分统计同步失败' : '关注的模型已刷新');
+}
 
 function scheduleRender() {
   if (renderScheduled) return;
@@ -141,6 +300,7 @@ function renderSites() {
 }
 
 function render() {
+  if (state.view === 'favorites') { renderFavorites(); return; }
   const data = state.data;
   if (!data) return;
   const referenceNow = now();
@@ -213,12 +373,13 @@ function render() {
     const rateClass = rateState(rate);
     const rateHtml = finite(rate) && rate >= 0 && rate <= 100 ? `<span class="rate-value ${rateClass}">${rate.toFixed(2)}<span class="unit">%</span></span>` : '<span class="no-value">—</span>';
     const endpoints = model.supported_endpoint_types?.join(' / ');
-    return `<tr class="model-row"${model.needsDetail ? ` data-hydrate="${escape(model.model_name)}"` : ''}><td><div class="model-cell">${avatar(model.family)}<div><button class="model-link" data-model="${escape(model.model_name)}" title="${escape(model.model_name)}">${escape(model.model_name)}</button><div class="model-caption">${escape(model.family)}${state.group ? ' / ' + escape(state.group) : endpoints ? ' / ' + escape(endpoints) : ''}</div></div></div></td><td>${badge(model.state)}</td><td>${renderHistory(metric)}</td><td class="numeric">${rateHtml}</td><td class="numeric">${value(finite(metric?.avg_latency_ms) ? metric.avg_latency_ms / 1000 : null, 's')}</td><td class="numeric">${finite(metric?.avg_tps) && metric.avg_tps > 0 ? value(metric.avg_tps, 'tok/s', 1) : '<span class="no-value">—</span>'}</td><td class="time-cell" title="统计时段的开始时间，UTC+8；不是最后一次请求时间">${model.latest ? escape(fullFormat.format(model.latest * 1000)) : '<span class="no-value">—</span>'}</td><td><button class="row-detail" data-model="${escape(model.model_name)}" aria-label="查看 ${escape(model.model_name)} 详情">›</button></td></tr>`;
+    return `<tr class="model-row"${model.needsDetail ? ` data-hydrate="${escape(model.model_name)}"` : ''}><td><div class="model-cell">${favoriteButton(model.model_name)}${avatar(model.family)}<div><button class="model-link" data-model="${escape(model.model_name)}" title="${escape(model.model_name)}">${escape(model.model_name)}</button><div class="model-caption">${escape(model.family)}${state.group ? ' / ' + escape(state.group) : endpoints ? ' / ' + escape(endpoints) : ''}</div></div></div></td><td>${badge(model.state)}</td><td>${renderHistory(metric)}</td><td class="numeric">${rateHtml}</td><td class="numeric">${value(finite(metric?.avg_latency_ms) ? metric.avg_latency_ms / 1000 : null, 's')}</td><td class="numeric">${finite(metric?.avg_tps) && metric.avg_tps > 0 ? value(metric.avg_tps, 'tok/s', 1) : '<span class="no-value">—</span>'}</td><td class="time-cell" title="统计时段的开始时间，UTC+8；不是最后一次请求时间">${model.latest ? escape(fullFormat.format(model.latest * 1000)) : '<span class="no-value">—</span>'}</td><td><button class="row-detail" data-model="${escape(model.model_name)}" aria-label="查看 ${escape(model.model_name)} 详情">›</button></td></tr>`;
   }).join('');
   observeGroupRows();
 }
 
 async function loadData(manual = false) {
+  if (state.view === 'favorites') return loadFavorites(manual);
   if (state.busy || !state.site) return;
   const selectedSite = state.sites.find(site => site.id === state.site);
   if (!selectedSite) return;
@@ -323,6 +484,10 @@ $('window-controls').addEventListener('click', event => {
   if (!button || state.busy || Number(button.dataset.hours) === state.hours) return;
   state.hours = Number(button.dataset.hours);
   historyObserver?.disconnect();
+  if (state.view === 'favorites') {
+    for (const item of $('window-controls').children) { item.classList.toggle('active', item === button); item.setAttribute('aria-pressed', String(item === button)); }
+    loadFavorites(); return;
+  }
   for (const item of $('window-controls').children) { item.classList.toggle('active', item === button); item.setAttribute('aria-pressed', String(item === button)); }
   // Clear the previous window immediately so its values cannot be mislabeled.
   state.data = null;
@@ -337,9 +502,12 @@ $('window-controls').addEventListener('click', event => {
 });
 $('site-nav').addEventListener('click', event => {
   const button = event.target.closest('[data-site]');
-  if (button && state.site !== button.dataset.site) { siteManager?.rememberSelection(button.dataset.site); selectSite(button.dataset.site); }
+  if (button && (state.view !== 'overview' || state.site !== button.dataset.site)) { siteManager?.rememberSelection(button.dataset.site); selectSite(button.dataset.site); }
 });
 function selectSite(id) {
+  favoriteController?.abort();
+  favoriteGeneration++;
+  setView('overview');
   state.controller?.abort();
   state.loadRequest++;
   state.detailRequest++;
@@ -389,6 +557,20 @@ function selectSite(id) {
 $('mobile-sites').addEventListener('change', event => { siteManager?.rememberSelection(event.target.value); selectSite(event.target.value); });
 $('manage-sites').addEventListener('click', () => siteManager?.open());
 $('model-rows').addEventListener('click', event => {
+  if (event.target.closest('[data-favorite-overview]')) { selectSite(state.site); return; }
+  const favorite = event.target.closest('[data-favorite]');
+  if (favorite) {
+    const item = state.view === 'favorites' ? favorites.items.find(item => favoriteKey(item) === favorite.dataset.favorite) : currentFavorite(favorite.dataset.favorite);
+    if (item) toggleFavorite(item);
+    return;
+  }
+  const open = event.target.closest('[data-favorite-open]');
+  if (open) {
+    const item = favorites.items.find(item => favoriteKey(item) === open.dataset.favoriteOpen);
+    const site = state.sites.find(site => site.url === item?.url);
+    if (site) { siteManager?.rememberSelection(site.id); selectSite(site.id); state.group = item.group; state.search = item.model; state.recorded = false; $('search').value = item.model; $('recorded-only').checked = false; }
+    return;
+  }
   const button = event.target.closest('[data-model]');
   if (button) showDetail(button.dataset.model);
   if (event.target.closest('#reset-filters')) resetFilters();
@@ -398,24 +580,36 @@ function resetFilters() {
   state.search = ''; state.family = 'all'; state.filter = 'all'; state.recorded = false;
   $('search').value = ''; $('recorded-only').checked = false; render();
 }
-$('overview-nav').addEventListener('click', resetFilters);
+$('overview-nav').addEventListener('click', () => { if (state.view === 'favorites') selectSite(state.site); else resetFilters(); });
+$('favorites-nav').addEventListener('click', openFavorites);
+for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => button.dataset.view === 'favorites' ? openFavorites() : selectSite(state.site));
+window.addEventListener('hashchange', () => { if (location.hash === '#favorites') openFavorites(); else if (state.view === 'favorites') selectSite(state.site); });
 for (const id of ['status-help', 'footer-help']) $(id).addEventListener('click', () => showInfo());
 for (const button of document.querySelectorAll('.close-dialog')) button.addEventListener('click', () => button.closest('dialog').close());
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => {
   if (event.target === dialog) { const r = dialog.getBoundingClientRect(); if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close(); }
 });
 document.addEventListener('keydown', event => {
-  if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); $('search').focus(); }
+  if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) && !document.querySelector('dialog[open]')) { event.preventDefault(); (state.view === 'favorites' ? $('favorites-nav') : $('search')).focus(); }
 });
 document.addEventListener('visibilitychange', () => { updateLiveClock(); if (!document.hidden && state.interval && Date.now() >= state.nextRefresh) loadData(); });
 setInterval(() => {
   updateLiveClock();
   // Also age statuses while automatic fetching is paused.
-  if (state.data && state.models.some(model => model.state !== classify(model.metric, now(), model.interrupted))) render();
+  if (state.view === 'overview' && state.data && state.models.some(model => model.state !== classify(model.metric, now(), model.interrupted))) render();
+  if (state.view === 'favorites') {
+    let aged = false;
+    for (const result of favoriteRows.values()) {
+      if (result.state === 'loading' || result.state === 'interrupted') continue;
+      const next = classify(result.metric, Date.now());
+      if (result.state !== next) { result.state = next; aged = true; }
+    }
+    if (aged) renderFavorites();
+  }
   if (state.interval === 0) { $('next-refresh').textContent = '已暂停自动同步'; return; }
   const remaining = Math.max(0, Math.ceil((state.nextRefresh - Date.now()) / 1000));
   $('next-refresh').textContent = state.busy ? '正在同步…' : `${remaining} 秒后自动同步`;
-  if (!document.hidden && !state.busy && state.site && Date.now() >= state.nextRefresh) loadData();
+  if (!document.hidden && !state.busy && (state.site || state.view === 'favorites') && Date.now() >= state.nextRefresh) loadData();
 }, 1000);
 
 async function init() {
@@ -427,6 +621,8 @@ async function init() {
     state.sites = siteManager.sites;
     const selected = state.sites.find(site => site.url === siteManager.selectedUrl) || state.sites[0];
     selectSite(selected?.id);
+    if (initialFavorites) openFavorites();
+    if (favorites.error) showToast('关注记录无法读取，请检查浏览器存储设置');
   } catch {
     $('site-nav').innerHTML = '<span class="skeleton-line">站点配置读取失败</span>';
     $('notice').hidden = false;
@@ -435,5 +631,7 @@ async function init() {
     $('refresh').onclick = () => location.reload();
   }
 }
+const initialFavorites = location.hash === '#favorites';
+$('favorites-count').textContent = favorites.items.length;
 updateLiveClock();
 init();
